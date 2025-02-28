@@ -512,64 +512,72 @@ function createLegend() {
 }
 
 function exportToWord() {
+    // Hlavička dokumentu s UTF-8 a základním stylem pro tisk
     const header = `
-        
-        
-            
-            
-            
-        
-        
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Rozpis služeb</title>
+            <style>
+                table { border-collapse: collapse; width: 100%; font-family: Arial, sans-serif; }
+                td, th { border: 1px solid black; padding: 5px; text-align: center; font-size: 12px; }
+                .shift-N { background-color: rgb(211,211,211); }
+                .shift-D { background-color: rgb(144,238,144); }
+                .shift-NSK { background-color: rgb(173,216,230); }
+                th { background-color: #f3f4f6; }
+            </style>
+        </head>
+        <body>
     `;
 
+    // Název měsíce a roku
     const monthName = new Date(currentYear, currentMonth - 1).toLocaleString('cs', { month: 'long' });
     let content = `
-        
-Rozpis služeb - ${monthName} ${currentYear}
-        
+        <h1>Rozpis služeb - ${monthName} ${currentYear}</h1>
+        <table>
+            <tr>
+                <th>Jméno</th>
     `;
 
+    // Přidání dnů měsíce do hlavičky tabulky
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-
     for (let i = 1; i <= daysInMonth; i++) {
-        content += ``;
+        content += `<th>${i}</th>`;
     }
-    content += '';
+    content += '</tr>';
 
+    // Přidání řádků pro jednotlivé zaměstnance
     Object.keys(employees).forEach(employee => {
         const [lastName, firstName] = employee.split(' ');
         content += `
-            `;
+            <tr>
+                <td>${firstName} ${lastName}</td>
+        `;
         
+        // Přidání směn pro každý den
         for (let day = 1; day <= daysInMonth; day++) {
             const shift = shifts[`${employee}-${day}`] || '';
-            const isWeekendDay = isWeekend(day);
             let shiftClass = '';
             
             if (shift === 'N') shiftClass = 'shift-N';
             else if (shift === 'D') shiftClass = 'shift-D';
             else if (shift === 'NSK') shiftClass = 'shift-NSK';
             
-            content += ``;
+            content += `<td class="${shiftClass}">${shift}</td>`;
         }
-        content += '';
+        content += '</tr>';
     });
 
-    content += '
-            
-                
-Jméno
-${i}
-                
-                    
-${firstName}
-                    
-${lastName}
-                
-${shift}
-';
-    const footer = ``;
+    // Ukončení tabulky
+    content += '</table>';
 
+    // Patička dokumentu
+    const footer = `
+        </body>
+        </html>
+    `;
+
+    // Vytvoření a stažení souboru
     const blob = new Blob([header + content + footer], { type: 'application/msword' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
