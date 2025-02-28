@@ -720,170 +720,71 @@ function savePreferences() {
 }
 
 function generateShifts() {
+    console.log("Generování služeb spuštěno...");
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const floorEmployee = "Růžek Přízemí";
-    const maxAttempts = 10;
-    const lookBackDays = 7;
-    const maxRecursions = 50;
-
-    const existingShifts = { ...shifts };
+    const maxAttempts = 5; // Snížíme počet pokusů
     shifts = {};
 
-    function sortEmployeesByLoad(employeesList) {
-        return employeesList.sort((a, b) => {
-            const aShifts = Object.values(shifts).filter(s => s.startsWith(`${a}-`)).length;
-            const bShifts = Object.values(shifts).filter(s => s.startsWith(`${b}-`)).length;
-            return aShifts - bShifts;
-        });
-    }
-
     const employeesList = Object.keys(employees).filter(name => !employees[name].isFloor);
+    console.log("Zaměstnanci k dispozici:", employeesList);
 
     function checkFreeWeekends() {
         const weekendDays = [];
         for (let day = 1; day <= daysInMonth; day++) {
-            if (isWeekend(day)) {
-                weekendDays.push(day);
-            }
+            if (isWeekend(day)) weekendDays.push(day);
         }
-
         const freeWeekendsPerEmployee = {};
         employeesList.forEach(name => {
             freeWeekendsPerEmployee[name] = 0;
             weekendDays.forEach(day => {
                 const shift = shifts[`${name}-${day}`];
-                if (shift === undefined || shift === 'V' || shift === 'D') {
-                    freeWeekendsPerEmployee[name]++;
-                }
+                if (shift === undefined || shift === 'V' || shift === 'D') freeWeekendsPerEmployee[name]++;
             });
         });
-
-        return Object.entries(freeWeekendsPerEmployee).every(([name, count]) => 
-            count >= employees[name].minFreeWeekends
-        );
+        return Object.entries(freeWeekendsPerEmployee).every(([name, count]) => count >= employees[name].minFreeWeekends);
     }
 
-    function generateDay(day, history = [], recursionCount = 0) {
-        if (recursionCount >= maxRecursions) {
-            console.warn(`Den ${day}: Dosáhl maximálního počtu rekurzí (${maxRecursions}). Přeskakuji den.`);
-            return day;
-        }
+    function generateDay(day) {
+        console.log(`Generuji den ${day}`);
+        const dayShifts = {};
+        const availableEmployees = employeesList.filter(name => {
+            const rules = employees[name];
+            const prefs = employeePreferences[name] || {};
+            const currentShifts = Object.keys(shifts).filter(s => s.startsWith(`${name}-`)).length;
+            const unavailable = prefs.unavailableDays || [];
+            return !unavailable.includes(day) && currentShifts < 22;
+        });
+        console.log(`Dostupní zaměstnanci pro den ${day}:`, availableEmployees);
 
-        const isWeekendDay = isWeekend(day);
-        let attempts = 0;
-        let validAssignment = false;
-
-        while (attempts < maxAttempts && !validAssignment) {
-            let ranniCount = 0, odpoledniCount = 0, roCount = 0;
-            const dayShifts = {};
-
-            const availableEmployees = sortEmployeesByLoad(employeesList.filter(name => {
-                const rules = employees[name];
-                const prefs = employeePreferences[name] || {};
-                const currentShifts = Object.values(shifts).filter(s => s.startsWith(`${name}-`)).length;
-                const unavailable = prefs.unavailableDays || [];
-                
-                return !unavailable.includes(day) && 
-                       (rules.canNights || (!isWeekendDay && currentShifts < 5)) && 
-                       currentShifts < 22;
-            }));
-
-            const tryDoubleRO = () => {
-                const rEmployees = availableEmployees.filter(name => !Object.values(dayShifts).includes(`${name}-${day}`));
-                const oEmployees = availableEmployees.filter(name => !Object.values(dayShifts).includes(`${name}-${day}`));
-                if (rEmployees.length >= 2 && oEmployees.length >= 2) {
-                    rEmployees.slice(0, 2).forEach(name => dayShifts[`${name}-${day}`] = 'R');
-                    oEmployees.slice(0, 2).forEach(name => dayShifts[`${name}-${day}`] = 'O');
-                    return true;
-                }
-                return false;
-            };
-
-            const trySingleRO = () => {
-                const rEmployee = availableEmployees.find(name => !Object.values(dayShifts).includes(`${name}-${day}`));
-                const oEmployee = availableEmployees.find(name => !Object.values(dayShifts).includes(`${name}-${day}`));
-                const roEmployee = availableEmployees.find(name => !Object.values(dayShifts).includes(`${name}-${day}`) && employees[name].maxRO > 0);
-                if (rEmployee && oEmployee && roEmployee) {
-                    dayShifts[`${rEmployee}-${day}`] = 'R';
-                    dayShifts[`${oEmployee}-${day}`] = 'O';
-                    dayShifts[`${roEmployee}-${day}`] = 'RO';
-                    return true;
-                }
-                return false;
-            };
-
-            if (!tryDoubleRO()) {
-                trySingleRO();
-            }
-
-            const nightEligible = availableEmployees.filter(name => {
-                const rules = employees[name];
-                const nightShifts = Object.values(shifts).filter(s => s.startsWith(`${name}-`) && (s.endsWith('N') || s.endsWith('NSK'))).length;
-                const prefs = employeePreferences[name] || {};
-                return rules.canNights && nightShifts < rules.maxNights && !(prefs.unavailableDays || []).includes(day);
-            });
-
+        // Zkusíme základní přiřazení
+        if (availableEmployees.length >= 3) {
+            dayShifts[`${availableEmployees[0]}-${day}`] = 'R';
+            dayShifts[`${availableEmployees[1]}-${day}`] = 'O';
+            const nightEligible = availableEmployees.filter(name => employees[name].canNights);
             if (nightEligible.length > 0) {
-                const nightEmployee = nightEligible[0];
-                const rules = employees[nightEmployee];
-                let nightShift = 'N';
-                if (nightEmployee === "Vaněčková Dana" && [2, 3, 8, 13].includes(day)) {
-                    nightShift = 'NSK';
-                }
-                dayShifts[`${nightEmployee}-${day}`] = nightShift;
-            }
-
-            const tempShifts = { ...shifts, ...dayShifts };
-            shifts = { ...tempShifts };
-
-            if (checkRules() && checkOccupancy() && checkFreeWeekends()) {
-                validAssignment = true;
+                dayShifts[`${nightEligible[0]}-${day}`] = 'N';
             } else {
-                shifts = {};
-                attempts++;
-                if (attempts === maxAttempts && day > 1) {
-                    const rollbackDay = Math.max(1, day - lookBackDays);
-                    console.log(`Navracím se na den ${rollbackDay} kvůli problémům. Rekurze: ${recursionCount + 1}`);
-                    for (let d = rollbackDay; d <= day; d++) {
-                        Object.keys(shifts).forEach(key => {
-                            if (key.endsWith(`-${d}`)) delete shifts[key];
-                        });
-                    }
-                    return generateDay(rollbackDay, [...history, day], recursionCount + 1);
-                }
-                employeesList.sort(() => Math.random() - 0.5);
+                console.warn(`Den ${day}: Žádný zaměstnanec na noční službu`);
             }
+        } else {
+            console.warn(`Den ${day}: Nedostatek zaměstnanců (${availableEmployees.length})`);
         }
 
-        if (!validAssignment) {
-            console.warn(`Den ${day}: Nepodařilo se po ${maxAttempts} pokusech.`);
-            Object.entries(existingShifts).forEach(([key, value]) => {
-                if (!shifts[key] && !key.startsWith(`${floorEmployee}-`)) {
-                    shifts[key] = value;
-                }
-            });
+        Object.assign(shifts, dayShifts);
+
+        // Kontrola - pokud nesplňuje, pokračujeme dál
+        if (!checkRules() || !checkOccupancy()) {
+            console.warn(`Den ${day}: Nesplňuje pravidla nebo obsazení`);
         }
-        return day;
     }
 
-    let currentDay = 1;
-    while (currentDay <= daysInMonth) {
-        currentDay = generateDay(currentDay) + 1;
-        if (currentDay > daysInMonth) break;
+    for (let day = 1; day <= daysInMonth; day++) {
+        generateDay(day);
     }
 
-    Object.entries(existingShifts).forEach(([key, value]) => {
-        if (key.startsWith(`${floorEmployee}-`)) shifts[key] = value;
-    });
-
-    Object.entries(existingShifts).forEach(([key, value]) => {
-        if (!shifts[key] && !key.startsWith(`${floorEmployee}-`)) shifts[key] = value;
-    });
-
-    checkRules();
-    checkOccupancy();
-    calculateStats();
     updateTable();
     saveShifts();
-    alert('Služby vygenerovány. Růžek Přízemí zůstal nedotčen. Některé dny mohou být neúplné.');
+    console.log("Generování dokončeno, shifts:", shifts);
+    alert('Služby vygenerovány. Některé dny mohou být neúplné.');
 }
